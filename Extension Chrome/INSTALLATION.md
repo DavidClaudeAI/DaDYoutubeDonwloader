@@ -16,7 +16,7 @@ npm install
 npm start
 ```
 
-Le serveur backend doit être démarré sur `http://localhost:3000` avant d'utiliser l'extension.
+Le serveur backend doit être démarré sur `http://localhost:3010` avant d'utiliser l'extension.
 
 ### 2. Installer l'extension Chrome
 
@@ -32,21 +32,19 @@ Le serveur backend doit être démarré sur `http://localhost:3000` avant d'util
 1. Ouvrez une vidéo YouTube
 2. Cliquez sur l'icône de l'extension dans la barre d'outils
 3. Les informations de la vidéo s'afficheront automatiquement
-4. Choisissez la qualité souhaitée (360p, 480p ou 720p)
-5. Cliquez sur "Télécharger la vidéo"
-6. Suivez la progression en temps réel dans le popup
+4. Cliquez sur "Télécharger la vidéo" (meilleure qualité disponible, jusqu'en 4K)
+5. Suivez la progression en temps réel dans le popup
 
 ### Méthode 2 : Bouton sur la page YouTube
 1. Ouvrez une vidéo YouTube
 2. Un bouton bleu "📥 Télécharger" apparaîtra sous la vidéo
-3. Cliquez dessus pour télécharger en 720p
-4. Le bouton affichera la progression du téléchargement
+3. Cliquez dessus : le popup s'ouvre, cliquez sur "Télécharger la vidéo"
 
 ## 🔧 Dépannage
 
 **Le serveur backend ne démarre pas** :
 - Vérifiez que Node.js est installé : `node --version`
-- Assurez-vous que le port 3000 n'est pas déjà utilisé
+- Assurez-vous que le port 3010 n'est pas déjà utilisé
 
 **L'extension ne s'affiche pas** :
 - Rechargez l'extension dans `chrome://extensions/`

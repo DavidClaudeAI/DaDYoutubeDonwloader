@@ -16,10 +16,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function handleVideoDownload(request) {
-  const { videoId, quality, title } = request;
+  const { videoId, title } = request;
 
   try {
-    console.log(`Requesting download for video ${videoId} at ${quality}`);
+    console.log(`Requesting download for video ${videoId}`);
 
     // Vérifier d'abord que le backend est accessible
     try {
@@ -39,7 +39,7 @@ async function handleVideoDownload(request) {
     const startResponse = await fetch(`${BACKEND_URL}/api/download/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId, quality, title })
+      body: JSON.stringify({ videoId, title })
     });
 
     const startData = await startResponse.json();

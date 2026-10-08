@@ -4,8 +4,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const videoTitle = document.getElementById('videoTitle');
   const videoChannel = document.getElementById('videoChannel');
   const status = document.getElementById('status');
-  const qualityOptions = document.getElementById('qualityOptions');
-  const qualityList = document.getElementById('qualityList');
   const downloadBtn = document.getElementById('downloadBtn');
   const progressContainer = document.getElementById('progressContainer');
   const progressMessage = document.getElementById('progressMessage');
@@ -13,19 +11,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const progressFill = document.getElementById('progressFill');
 
   let currentVideoData = null;
-  let selectedQuality = null;
 
   // Vérifier s'il y a un téléchargement en cours
   const { activeDownload } = await chrome.storage.local.get('activeDownload');
   if (activeDownload) {
     // Restaurer l'état du téléchargement en cours
     currentVideoData = activeDownload.videoData;
-    selectedQuality = activeDownload.quality;
 
     displayVideoInfo(currentVideoData);
-
-    // Masquer les options de qualité pendant le téléchargement
-    qualityOptions.classList.add('hidden');
 
     // Réactiver la surveillance du téléchargement
     downloadBtn.disabled = true;
@@ -73,40 +66,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     videoTitle.textContent = data.title;
     videoChannel.textContent = data.channel;
 
-    // Afficher les options de qualité
-    qualityOptions.classList.remove('hidden');
-    qualityList.innerHTML = '';
-
-    // Si selectedQuality n'est pas définie, utiliser 1080p par défaut
-    if (!selectedQuality) {
-      selectedQuality = '1080p';
-    }
-
-    // Créer les boutons radio pour les qualités disponibles
-    const qualities = ['2160p', '1440p', '1080p', '720p', '480p', '360p'];
-    qualities.forEach(quality => {
-      const label = document.createElement('label');
-      label.className = 'quality-option';
-
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'quality';
-      radio.value = quality;
-
-      // Cocher la qualité sélectionnée (ou 1080p par défaut)
-      if (quality === selectedQuality) {
-        radio.checked = true;
-      }
-
-      radio.addEventListener('change', () => {
-        selectedQuality = quality;
-      });
-
-      label.appendChild(radio);
-      label.appendChild(document.createTextNode(` ${quality}`));
-      qualityList.appendChild(label);
-    });
-
     downloadBtn.classList.remove('hidden');
   }
 
@@ -114,7 +73,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function resetDownloadState(errorMessage) {
     await chrome.storage.local.remove('activeDownload');
     progressContainer.classList.add('hidden');
-    qualityOptions.classList.remove('hidden');
     status.textContent = errorMessage;
     status.className = 'status-message error';
     downloadBtn.textContent = 'Télécharger la vidéo';
@@ -214,9 +172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   downloadBtn.addEventListener('click', async () => {
-    if (!currentVideoData || !selectedQuality) {
-      status.textContent = 'Veuillez sélectionner une qualité.';
-      status.className = 'status-message error';
+    if (!currentVideoData) {
       return;
     }
 
@@ -224,9 +180,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     downloadBtn.textContent = 'Téléchargement en cours...';
     status.textContent = '';
     status.className = 'status-message hidden';
-
-    // Masquer les options de qualité
-    qualityOptions.classList.add('hidden');
 
     // Afficher la barre de progression
     progressContainer.classList.remove('hidden');
@@ -241,7 +194,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           videoId: currentVideoData.videoId,
-          quality: selectedQuality,
           title: currentVideoData.title
         })
       });
@@ -263,8 +215,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.storage.local.set({
         activeDownload: {
           downloadId: serverDownloadId,
-          videoData: currentVideoData,
-          quality: selectedQuality
+          videoData: currentVideoData
         }
       });
 
@@ -293,7 +244,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       progressContainer.classList.add('hidden');
-      qualityOptions.classList.remove('hidden');
       status.textContent = errorMessage;
       status.className = 'status-message error';
       downloadBtn.textContent = 'Télécharger la vidéo';

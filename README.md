@@ -6,7 +6,8 @@ Extension Chrome avec serveur backend local pour télécharger des vidéos YouTu
 
 - ✅ Téléchargement autonome sans services tiers
 - 🎬 Interface popup élégante avec aperçu de la vidéo
-- 🎚️ Choix de la qualité (360p à 2160p)
+- 🎚️ Meilleure qualité disponible, automatiquement, jusqu'en 4K (2160p)
+- 🎬 Fichiers prêts pour DaVinci Resolve (voir « Formats et DaVinci Resolve »)
 - 📥 Téléchargement direct via le backend local
 - 🔘 Bouton intégré sur la page YouTube
 
@@ -48,7 +49,7 @@ npm install
 npm start
 ```
 
-Le serveur devrait démarrer sur `http://localhost:3000`
+Le serveur devrait démarrer sur `http://localhost:3010`
 
 ### Étape 3 : Charger l'extension dans Chrome
 
@@ -64,22 +65,21 @@ Le serveur devrait démarrer sur `http://localhost:3000`
 
 1. Ouvrez une vidéo YouTube
 2. Cliquez sur l'icône de l'extension
-3. Choisissez la qualité
-4. Cliquez sur **Télécharger la vidéo**
-5. Le fichier sera téléchargé dans votre dossier de téléchargements
+3. Cliquez sur **Télécharger la vidéo**
+4. Le fichier sera téléchargé dans votre dossier de téléchargements
 
 ### Méthode 2 : Bouton sur la page
 
 1. Ouvrez une vidéo YouTube
 2. Cliquez sur le bouton **📥 Télécharger** sous la vidéo
-3. Le téléchargement démarre en 720p
+3. Le popup s'ouvre : cliquez sur **Télécharger la vidéo**
 
 ## 🔧 Configuration
 
 Modifiez `Extension Chrome/config.js` pour changer :
-- L'URL du backend (par défaut : `http://localhost:3000`)
-- Les qualités disponibles
-- La qualité par défaut
+- L'URL du backend (par défaut : `http://localhost:3010`)
+
+Le plafond de résolution (`MAX_HEIGHT`, 2160) et le choix du format sont dans `backend/server.js`.
 
 ## ⚙️ Comment ça fonctionne ?
 
@@ -137,11 +137,27 @@ Le package `youtube-dl-exec` télécharge automatiquement `yt-dlp` lors de l'ins
 
 ### Erreur "Failed to fetch"
 
-Le serveur backend n'est pas accessible. Assurez-vous qu'il tourne sur le port 3000.
+Le serveur backend n'est pas accessible. Assurez-vous qu'il tourne sur le port 3010.
 
 ### Vidéo de mauvaise qualité
 
-Certaines vidéos ne sont pas disponibles dans toutes les qualités. Essayez une qualité inférieure.
+Le serveur prend toujours la meilleure résolution proposée par YouTube, jusqu'en 4K. Si le fichier est en dessous, c'est que YouTube ne propose pas mieux pour cette vidéo — ou que le repli « qualité adaptée » s'est déclenché (blocage nsig/SABR/403 de YouTube, visible dans les logs du serveur).
+
+## 🎬 Formats et DaVinci Resolve
+
+Le serveur livre toujours un `.mp4` que DaVinci Resolve lit sans « média manquant » :
+
+| Ce que YouTube propose | Ce que le serveur livre |
+|---|---|
+| AV1 8 bits (le cas le plus fréquent en 4K) | gardé tel quel |
+| H.264 ou HEVC | gardé tel quel |
+| VP9 seulement | converti en HEVC par la carte graphique (NVENC) |
+| AV1 10 bits (versions HDR) | converti en HEVC 10 bits |
+| Son Opus | converti en AAC 320 kb/s |
+
+Pourquoi : sur Resolve 21.1 (RTX 3080 Ti), le VP9 échoue au décodage sur l'image qui précède chaque image clé (« Failed to decode the video frame » dans `davinci_resolve.log`), ce qui produit des flashs de média manquant. L'AV1 8 bits, le H.264 et le HEVC se lisent sans erreur. Les versions SDR sont préférées aux HDR.
+
+La conversion n'a lieu que si nécessaire ; elle va environ trois fois plus vite que la durée de la vidéo. Elle nécessite `ffmpeg` et `ffprobe` dans le PATH, avec l'encodeur `hevc_nvenc` (carte NVIDIA).
 
 ## ⚠️ Avertissement légal
 
@@ -157,9 +173,8 @@ Utilisez-la de manière responsable et respectez :
 ## 📝 Notes techniques
 
 - L'extension utilise Manifest V3
-- Le backend utilise `youtube-dl-exec` qui enveloppe `yt-dlp`
-- Les vidéos sont streamées directement depuis YouTube vers Chrome
-- Aucune vidéo n'est stockée sur le serveur (streaming direct)
+- Le backend appelle `backend/yt-dlp.exe` directement, puis `ffmpeg` pour préparer le fichier
+- La vidéo est téléchargée dans `backend/downloads/`, envoyée à Chrome, puis supprimée
 
 ## 🔄 Développement
 
@@ -200,7 +215,7 @@ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 
 Modifiez `backend/server.js` :
 ```javascript
-const PORT = 3000; // Changez cette valeur
+const PORT = 3010; // Changez cette valeur
 ```
 
 Et mettez à jour `Extension Chrome/config.js` en conséquence.
