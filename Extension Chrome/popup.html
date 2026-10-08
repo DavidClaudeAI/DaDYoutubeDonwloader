@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>📥 YouTube Downloader</h1>
+
+    <div id="videoInfo" class="hidden">
+      <div class="video-thumbnail">
+        <img id="thumbnail" src="" alt="Video thumbnail">
+      </div>
+      <h3 id="videoTitle">Titre de la vidéo</h3>
+      <p class="video-channel" id="videoChannel">Nom de la chaîne</p>
+    </div>
+
+    <div id="status" class="status-message"></div>
+
+    <div id="progressContainer" class="progress-container hidden">
+      <div class="progress-text">
+        <span id="progressMessage">Téléchargement en cours...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </div>
+
+    <div id="qualityOptions" class="hidden">
+      <h4>Choisissez la qualité :</h4>
+      <div id="qualityList"></div>
+    </div>
+
+    <button id="downloadBtn" class="download-btn hidden">
+      Télécharger la vidéo
+    </button>
+
+    <div class="info-message">
+      <p>⚠️ Assurez-vous d'être sur une page YouTube avec une vidéo.</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

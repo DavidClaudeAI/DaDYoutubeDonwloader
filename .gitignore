@@ -1,0 +1,11 @@
+# Dépendances
+node_modules/
+
+# Vidéos téléchargées (fichiers temporaires du serveur)
+backend/downloads/
+
+# Cookies YouTube : identifiants personnels, ne jamais versionner
+backend/cookies.txt
+
+# Binaires yt-dlp (mis à jour par `yt-dlp.exe -U`)
+backend/*.exe
