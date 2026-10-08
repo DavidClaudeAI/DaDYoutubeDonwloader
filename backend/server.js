@@ -494,6 +494,23 @@ async function processDownload(downloadId, videoId) {
   }
 }
 
+// Un téléchargement prêt livre deux fichiers : la vidéo, puis le raccourci
+// .url. L'entrée de la queue n'est retirée qu'une fois les deux servis —
+// la retirer dès la fin de la vidéo faisait échouer la demande du .url
+// (404), et Chrome abandonnait ce téléchargement sans rien afficher.
+function releaseDownload(downloadId, part) {
+  const download = downloadQueue.get(downloadId);
+  if (!download) {
+    return;
+  }
+  const served = { ...download.served, [part]: true };
+  if (served.file && served.url) {
+    downloadQueue.delete(downloadId);
+  } else {
+    downloadQueue.set(downloadId, { ...download, served });
+  }
+}
+
 // Endpoint pour vérifier le statut d'un téléchargement
 app.get('/api/download/status/:downloadId', (req, res) => {
   const { downloadId } = req.params;
@@ -551,26 +568,17 @@ app.get('/api/download/file/:downloadId', (req, res) => {
   const fileStream = fs.createReadStream(filePath);
   fileStream.pipe(res);
 
-  // Supprimer le fichier après l'envoi
-  fileStream.on('end', () => {
-    console.log(`File sent to client, deleting: ${filePath}`);
-    fs.rmSync(filePath, { force: true });
-    downloadQueue.delete(downloadId);
-  });
-
+  // Supprimer la vidéo une fois envoyée (ou abandonnée). L'entrée de la queue
+  // reste en place : le raccourci .url est demandé juste après par l'extension.
   fileStream.on('error', (error) => {
     console.error('File stream error:', error);
-    fs.rmSync(filePath, { force: true });
-    downloadQueue.delete(downloadId);
   });
 
   res.on('close', () => {
     fileStream.destroy();
-    if (fs.existsSync(filePath)) {
-      fs.rmSync(filePath, { force: true });
-      console.log('Client disconnected, deleted temporary file');
-    }
-    downloadQueue.delete(downloadId);
+    fs.rmSync(filePath, { force: true });
+    console.log(`Video ${res.writableFinished ? 'sent to client' : 'abandoned by client'}, deleted: ${filePath}`);
+    releaseDownload(downloadId, 'file');
   });
 });
 
@@ -610,6 +618,7 @@ app.get('/api/download/url/:downloadId', (req, res) => {
   // Supprimer le fichier .url après l'envoi
   console.log(`URL shortcut sent to client, deleting: ${urlFilePath}`);
   fs.rmSync(urlFilePath, { force: true });
+  releaseDownload(downloadId, 'url');
 });
 
 // Health check
@@ -629,6 +638,14 @@ async function clearYtdlpCache() {
 }
 
 app.listen(PORT, async () => {
+  // Le dossier ne sert qu'aux téléchargements en cours : ce qu'il contient au
+  // démarrage est un reste d'une session précédente (serveur arrêté en plein
+  // téléchargement, raccourci jamais réclamé). Vidé ici, une fois le port
+  // obtenu, pour qu'un second lancement par erreur n'efface rien au premier.
+  for (const name of fs.readdirSync(DOWNLOAD_DIR)) {
+    fs.rmSync(path.join(DOWNLOAD_DIR, name), { recursive: true, force: true });
+  }
+
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📁 Download directory: ${DOWNLOAD_DIR}`);
   console.log(`🎬 Using yt-dlp: ${YTDLP_PATH}`);

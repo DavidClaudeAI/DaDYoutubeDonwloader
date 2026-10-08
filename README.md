@@ -175,6 +175,8 @@ Utilisez-la de manière responsable et respectez :
 - L'extension utilise Manifest V3
 - Le backend appelle `backend/yt-dlp.exe` directement, puis `ffmpeg` pour préparer le fichier
 - La vidéo est téléchargée dans `backend/downloads/`, envoyée à Chrome, puis supprimée
+- Chaque téléchargement livre aussi un raccourci `.url` vers la vidéo YouTube, proposé juste après la vidéo
+- `backend/downloads/` est un dossier temporaire : il est vidé à chaque démarrage du serveur
 
 ## 🔄 Développement
 
