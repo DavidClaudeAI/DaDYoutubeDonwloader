@@ -10,6 +10,7 @@ Extension Chrome avec serveur backend local pour télécharger des vidéos YouTu
 - 🎬 Fichiers prêts pour DaVinci Resolve (voir « Formats et DaVinci Resolve »)
 - 📥 Téléchargement direct via le backend local
 - 🔘 Bouton intégré sur la page YouTube
+- ✖️ Bouton **Annuler** pendant le téléchargement, à n'importe quelle étape
 
 ## 📁 Structure du projet
 
@@ -67,6 +68,18 @@ Le serveur devrait démarrer sur `http://localhost:3010`
 2. Cliquez sur l'icône de l'extension
 3. Cliquez sur **Télécharger la vidéo**
 4. Le fichier sera téléchargé dans votre dossier de téléchargements
+
+Pour arrêter en route, cliquez sur **Annuler** sous la barre de progression,
+même après avoir fermé puis rouvert le popup. Quelle que soit l'étape
+(récupération des informations, téléchargement, conversion pour Resolve), le
+serveur arrête yt-dlp et ffmpeg, supprime les fichiers commencés, et le popup
+revient à son état d'ouverture avec le bouton **Télécharger la vidéo**. Une fois
+le fichier passé à Chrome, c'est la fenêtre d'enregistrement de Chrome qui
+permet d'annuler.
+
+Le serveur expose pour cela `POST /api/download/cancel/:downloadId`. Il arrête
+le programme en cours avec tous ceux qu'il a lancés (`taskkill /T`) : yt-dlp
+lance lui-même ffmpeg pour fusionner l'image et le son.
 
 ### Méthode 2 : Bouton sur la page
 

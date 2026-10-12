@@ -90,8 +90,68 @@ function infoArgs(videoUrl) {
 const downloadQueue = new Map(); // downloadId -> { status, progress, message, filePath, filename, urlFilePath, error }
 
 // Met à jour une entrée de la queue en gardant les champs non précisés.
+// Une entrée retirée (téléchargement annulé) n'est jamais recréée par une
+// dernière ligne de progression arrivée après coup.
 function updateDownload(downloadId, fields) {
-  downloadQueue.set(downloadId, { ...downloadQueue.get(downloadId), ...fields });
+  const download = downloadQueue.get(downloadId);
+  if (download) {
+    downloadQueue.set(downloadId, { ...download, ...fields });
+  }
+}
+
+// Annulation. Pour chaque téléchargement en cours, on retient le programme
+// qui travaille à cet instant (yt-dlp, ffprobe ou ffmpeg) afin de pouvoir
+// l'arrêter, quelle que soit l'étape.
+const runningJobs = new Map(); // downloadId -> { cancelled, child, killed }
+
+class DownloadCancelledError extends Error {
+  constructor() {
+    super('Téléchargement annulé');
+    this.name = 'DownloadCancelledError';
+  }
+}
+
+// Retient le programme en cours d'un téléchargement ; s'il a été annulé
+// entre-temps, le programme qui vient de démarrer est arrêté aussitôt.
+function trackChild(downloadId, child) {
+  const job = runningJobs.get(downloadId);
+  if (!job) {
+    return;
+  }
+  job.child = child;
+  if (job.cancelled) {
+    job.killed = killTree(child);
+  }
+}
+
+function ensureNotCancelled(downloadId) {
+  if (runningJobs.get(downloadId)?.cancelled) {
+    throw new DownloadCancelledError();
+  }
+}
+
+// Arrête un programme ET ceux qu'il a lancés : yt-dlp lance lui-même ffmpeg
+// pour fusionner image et son, et un simple kill() laisserait ce ffmpeg
+// tourner en gardant les fichiers ouverts. Résout quand tout est arrêté.
+function killTree(child) {
+  return new Promise((resolve) => {
+    if (!child || child.exitCode !== null || child.pid === undefined) {
+      resolve();
+      return;
+    }
+    if (process.platform !== 'win32') {
+      child.kill('SIGKILL');
+      resolve();
+      return;
+    }
+    execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => resolve());
+  });
+}
+
+// Supprime un fichier, en réessayant tant que Windows le garde verrouillé
+// juste après l'arrêt du programme qui l'écrivait.
+function removeFile(filePath) {
+  fs.rmSync(filePath, { force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 function sanitizeTitle(title) {
@@ -145,19 +205,48 @@ app.post('/api/download/start', async (req, res) => {
       filePath: null,
       error: null
     });
+    runningJobs.set(downloadId, { cancelled: false, child: null, killed: Promise.resolve() });
 
     // Retourner immédiatement le downloadId au client
     res.json({ success: true, downloadId });
 
     // Démarrer le téléchargement en arrière-plan
     processDownload(downloadId, videoId).catch(error => {
-      console.error(`Download ${downloadId} failed:`, error);
+      if (!(error instanceof DownloadCancelledError)) {
+        console.error(`Download ${downloadId} failed:`, error);
+      }
     });
 
   } catch (error) {
     console.error('Error starting download:', error);
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// Endpoint pour annuler un téléchargement, à n'importe quelle étape.
+// En cours : le programme qui travaille est arrêté, et processDownload
+// supprime les fichiers commencés. Déjà prêt : les fichiers produits sont
+// supprimés. Dans tous les cas l'entrée disparaît de la queue. Annuler un
+// téléchargement inconnu (déjà fini ou déjà annulé) n'est pas une erreur.
+app.post('/api/download/cancel/:downloadId', (req, res) => {
+  const { downloadId } = req.params;
+  const job = runningJobs.get(downloadId);
+  const download = downloadQueue.get(downloadId);
+
+  if (job) {
+    job.cancelled = true;
+    job.killed = killTree(job.child);
+  } else if (download) {
+    for (const file of [download.filePath, download.urlFilePath]) {
+      if (file) {
+        removeFile(file);
+      }
+    }
+  }
+  downloadQueue.delete(downloadId);
+
+  console.log(`[${downloadId}] Cancelled by user`);
+  res.json({ success: true });
 });
 
 // Fonction pour créer un fichier raccourci .url Windows
@@ -204,6 +293,7 @@ async function downloadWithFormat(downloadId, videoUrl, formatSelector, attemptN
     );
 
     const ytdlp = spawn(YTDLP_PATH, args);
+    trackChild(downloadId, ytdlp);
     console.log(`[${downloadId}] yt-dlp process started (attempt ${attemptNumber})`);
 
     let stderrData = '';
@@ -243,6 +333,10 @@ async function downloadWithFormat(downloadId, videoUrl, formatSelector, attemptN
 
     ytdlp.on('close', (code) => {
       console.log(`[${downloadId}] yt-dlp process exited with code ${code}`);
+      if (runningJobs.get(downloadId)?.cancelled) {
+        reject(new DownloadCancelledError());
+        return;
+      }
       if (code === 0) {
         // Dernière ligne non vide de stdout = chemin du fichier final.
         const lines = stdoutData.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -289,18 +383,20 @@ async function downloadWithFormat(downloadId, videoUrl, formatSelector, attemptN
 function removeSourceFiles(downloadId) {
   for (const name of fs.readdirSync(DOWNLOAD_DIR)) {
     if (name.startsWith(`${downloadId}.source.`)) {
-      fs.rmSync(path.join(DOWNLOAD_DIR, name), { force: true });
+      removeFile(path.join(DOWNLOAD_DIR, name));
     }
   }
 }
 
-async function probeStreams(filePath) {
-  const { stdout } = await execFileAsync(FFPROBE, [
+async function probeStreams(downloadId, filePath) {
+  const probe = execFileAsync(FFPROBE, [
     '-v', 'error',
     '-show_entries', 'stream=codec_type,codec_name,pix_fmt',
     '-of', 'json',
     filePath
   ]);
+  trackChild(downloadId, probe.child);
+  const { stdout } = await probe;
   const streams = JSON.parse(stdout).streams || [];
   return {
     video: streams.find(s => s.codec_type === 'video'),
@@ -332,7 +428,8 @@ function videoPlan(video) {
 // un .mp4). La progression de ffmpeg (`-progress pipe:1`) alimente la barre
 // de l'extension.
 async function prepareForResolve(downloadId, sourcePath, finalPath, durationSec) {
-  const { video, audio } = await probeStreams(sourcePath);
+  const { video, audio } = await probeStreams(downloadId, sourcePath);
+  ensureNotCancelled(downloadId);
   if (!video) {
     throw new Error('Le fichier téléchargé ne contient pas de vidéo.');
   }
@@ -378,6 +475,7 @@ async function prepareForResolve(downloadId, sourcePath, finalPath, durationSec)
 
   await new Promise((resolve, reject) => {
     const ffmpeg = spawn(FFMPEG, args);
+    trackChild(downloadId, ffmpeg);
     let stderrData = '';
 
     ffmpeg.stdout.on('data', (data) => {
@@ -393,6 +491,10 @@ async function prepareForResolve(downloadId, sourcePath, finalPath, durationSec)
     });
 
     ffmpeg.on('close', (code) => {
+      if (runningJobs.get(downloadId)?.cancelled) {
+        reject(new DownloadCancelledError());
+        return;
+      }
       if (code === 0) {
         resolve();
       } else {
@@ -421,9 +523,12 @@ async function processDownload(downloadId, videoId) {
     });
 
     console.log(`[${downloadId}] Fetching video info...`);
-    const { stdout: infoJson } = await execFileAsync(YTDLP_PATH, infoArgs(videoUrl), {
+    const infoRequest = execFileAsync(YTDLP_PATH, infoArgs(videoUrl), {
       maxBuffer: 10 * 1024 * 1024
     });
+    trackChild(downloadId, infoRequest.child);
+    const { stdout: infoJson } = await infoRequest;
+    ensureNotCancelled(downloadId);
     const videoInfo = JSON.parse(infoJson);
     const sanitizedTitle = sanitizeTitle(videoInfo.title);
 
@@ -435,6 +540,7 @@ async function processDownload(downloadId, videoId) {
 
     console.log(`[${downloadId}] Attempt 1: Trying format ${FORMAT_SELECTOR}`);
     let result = await downloadWithFormat(downloadId, videoUrl, FORMAT_SELECTOR, 1);
+    ensureNotCancelled(downloadId);
 
     if (!result.success && result.shouldFallback) {
       console.log(`[${downloadId}] ⚠️ First attempt failed with nsig/SABR error, falling back to ${FALLBACK_SELECTOR}`);
@@ -447,6 +553,7 @@ async function processDownload(downloadId, videoId) {
       });
 
       result = await downloadWithFormat(downloadId, videoUrl, FALLBACK_SELECTOR, 2);
+      ensureNotCancelled(downloadId);
     }
 
     if (!result.success) {
@@ -454,6 +561,7 @@ async function processDownload(downloadId, videoId) {
     }
 
     await prepareForResolve(downloadId, result.filePath, finalPath, videoInfo.duration);
+    ensureNotCancelled(downloadId);
     removeSourceFiles(downloadId);
 
     const stat = fs.statSync(finalPath);
@@ -477,10 +585,21 @@ async function processDownload(downloadId, videoId) {
     });
 
   } catch (error) {
+    const job = runningJobs.get(downloadId);
+    // Un programme arrêté par l'annulation finit en erreur (code de sortie
+    // non nul) : c'est l'annulation qui compte, pas ce message-là.
+    if (job?.cancelled) {
+      await job.killed;
+      removeSourceFiles(downloadId);
+      removeFile(finalPath);
+      console.log(`[${downloadId}] Cancelled: partial files removed`);
+      throw new DownloadCancelledError();
+    }
+
     console.error(`Error processing download ${downloadId}:`, error);
 
     removeSourceFiles(downloadId);
-    fs.rmSync(finalPath, { force: true });
+    removeFile(finalPath);
 
     updateDownload(downloadId, {
       status: 'error',
@@ -491,6 +610,8 @@ async function processDownload(downloadId, videoId) {
     });
 
     throw error;
+  } finally {
+    runningJobs.delete(downloadId);
   }
 }
 

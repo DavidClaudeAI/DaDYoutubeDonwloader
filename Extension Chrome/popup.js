@@ -9,8 +9,74 @@ document.addEventListener('DOMContentLoaded', async () => {
   const progressMessage = document.getElementById('progressMessage');
   const progressPercent = document.getElementById('progressPercent');
   const progressFill = document.getElementById('progressFill');
+  const cancelBtn = document.getElementById('cancelBtn');
 
   let currentVideoData = null;
+
+  // Le téléchargement suivi par ce popup : son identifiant côté serveur (connu
+  // une fois le démarrage accepté), sa surveillance, et s'il a été annulé.
+  // Chaque lancement a le sien : une réponse du serveur qui arrive après une
+  // annulation concerne un téléchargement révolu et ne touche plus à l'écran.
+  let currentJob = null;
+
+  function newJob() {
+    currentJob = { serverId: null, interval: null, cancelled: false };
+    return currentJob;
+  }
+
+  // Affiche l'état « en cours » : bouton grisé, progression et bouton Annuler.
+  function showDownloading() {
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Téléchargement en cours...';
+    downloadBtn.classList.remove('hidden');
+    progressContainer.classList.remove('hidden');
+    cancelBtn.classList.remove('hidden');
+  }
+
+  // Remet le popup dans l'état d'une ouverture : vidéo affichée, bouton
+  // Télécharger actif, ni progression ni message.
+  async function resetToIdle() {
+    if (currentJob) {
+      clearInterval(currentJob.interval);
+    }
+    currentJob = null;
+    await chrome.storage.local.remove('activeDownload');
+    progressContainer.classList.add('hidden');
+    progressMessage.textContent = 'Téléchargement en cours...';
+    progressPercent.textContent = '0%';
+    progressFill.style.width = '0%';
+    cancelBtn.classList.add('hidden');
+    cancelBtn.disabled = false;
+    status.textContent = '';
+    status.className = 'status-message';
+    downloadBtn.textContent = 'Télécharger la vidéo';
+    downloadBtn.disabled = false;
+  }
+
+  // Demande au serveur d'arrêter et d'effacer ce téléchargement. Si le
+  // serveur ne répond pas, il n'y a rien à arrêter de ce côté-ci.
+  async function cancelOnServer(serverId) {
+    try {
+      await fetch(`http://localhost:3010/api/download/cancel/${serverId}`, { method: 'POST' });
+    } catch (error) {
+      console.error('Cancel request error:', error);
+    }
+  }
+
+  cancelBtn.addEventListener('click', async () => {
+    const job = currentJob;
+    if (!job) {
+      return;
+    }
+    job.cancelled = true;
+    cancelBtn.disabled = true;
+    await resetToIdle();
+    // Sans identifiant, le démarrage est encore en route : le bouton
+    // Télécharger annulera le téléchargement dès que le serveur l'aura créé.
+    if (job.serverId) {
+      await cancelOnServer(job.serverId);
+    }
+  });
 
   // Vérifier s'il y a un téléchargement en cours
   const { activeDownload } = await chrome.storage.local.get('activeDownload');
@@ -21,12 +87,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     displayVideoInfo(currentVideoData);
 
     // Réactiver la surveillance du téléchargement
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = 'Téléchargement en cours...';
-    downloadBtn.classList.remove('hidden');
-    progressContainer.classList.remove('hidden');
-
-    monitorDownload(activeDownload.downloadId);
+    showDownloading();
+    const job = newJob();
+    job.serverId = activeDownload.downloadId;
+    monitorDownload(job);
     return;
   }
 
@@ -71,22 +135,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Fonction pour réinitialiser l'UI après une erreur
   async function resetDownloadState(errorMessage) {
-    await chrome.storage.local.remove('activeDownload');
-    progressContainer.classList.add('hidden');
+    await resetToIdle();
     status.textContent = errorMessage;
     status.className = 'status-message error';
-    downloadBtn.textContent = 'Télécharger la vidéo';
-    downloadBtn.disabled = false;
   }
 
   // Fonction pour surveiller un téléchargement
-  function monitorDownload(serverDownloadId) {
+  function monitorDownload(job) {
+    const serverDownloadId = job.serverId;
     let networkErrorCount = 0;
     const MAX_NETWORK_ERRORS = 5;
 
     const progressInterval = setInterval(async () => {
         try {
           const statusResponse = await fetch(`http://localhost:3010/api/download/status/${serverDownloadId}`);
+          if (job.cancelled) {
+            return;
+          }
 
           if (!statusResponse.ok) {
             clearInterval(progressInterval);
@@ -98,6 +163,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           networkErrorCount = 0;
 
           const statusData = await statusResponse.json();
+          if (job.cancelled) {
+            return;
+          }
 
           if (statusData.success) {
             const progress = statusData.progress || 0;
@@ -116,6 +184,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (statusData.status === 'ready') {
               clearInterval(progressInterval);
+              // Le fichier passe à Chrome, dont la fenêtre d'enregistrement
+              // a son propre bouton Annuler.
+              cancelBtn.classList.add('hidden');
               progressMessage.textContent = 'Récupération du fichier...';
               progressPercent.textContent = '100%';
               progressFill.style.width = '100%';
@@ -150,17 +221,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Ne pas bloquer si le téléchargement du .url échoue
               }
 
-              // Supprimer l'état sauvegardé
-              await chrome.storage.local.remove('activeDownload');
-
-              progressContainer.classList.add('hidden');
+              await resetToIdle();
               status.textContent = '✓ Téléchargement terminé !';
               status.className = 'status-message success';
-              downloadBtn.textContent = 'Télécharger la vidéo';
-              downloadBtn.disabled = false;
             }
           }
         } catch (error) {
+          if (job.cancelled) {
+            return;
+          }
           console.error('Progress check error:', error);
           networkErrorCount++;
           if (networkErrorCount >= MAX_NETWORK_ERRORS) {
@@ -169,6 +238,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         }
       }, 500);
+    job.interval = progressInterval;
   }
 
   downloadBtn.addEventListener('click', async () => {
@@ -176,13 +246,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = 'Téléchargement en cours...';
+    const job = newJob();
+    showDownloading();
     status.textContent = '';
     status.className = 'status-message hidden';
 
     // Afficher la barre de progression
-    progressContainer.classList.remove('hidden');
     progressMessage.textContent = 'Démarrage du téléchargement...';
     progressPercent.textContent = '0%';
     progressFill.style.width = '0%';
@@ -210,6 +279,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const serverDownloadId = startData.downloadId;
       console.log('Server download ID:', serverDownloadId);
+      job.serverId = serverDownloadId;
+
+      // Annulé pendant que le serveur démarrait : le popup est déjà revenu
+      // à l'état initial, il reste à arrêter ce que le serveur a lancé.
+      if (job.cancelled) {
+        await cancelOnServer(serverDownloadId);
+        return;
+      }
 
       // Sauvegarder l'état du téléchargement
       await chrome.storage.local.set({
@@ -220,9 +297,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       // Surveiller la progression
-      monitorDownload(serverDownloadId);
+      monitorDownload(job);
 
     } catch (error) {
+      if (job.cancelled) {
+        return;
+      }
       console.error('Download error:', error);
 
       let errorMessage = error.message;
@@ -243,11 +323,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           '6. Redémarrez le serveur backend';
       }
 
-      progressContainer.classList.add('hidden');
+      await resetToIdle();
       status.textContent = errorMessage;
       status.className = 'status-message error';
-      downloadBtn.textContent = 'Télécharger la vidéo';
-      downloadBtn.disabled = false;
     }
   });
 });
