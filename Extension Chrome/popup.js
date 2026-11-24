@@ -140,6 +140,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     status.className = 'status-message error';
   }
 
+  // Confie un fichier du serveur au navigateur, qui demande où l'enregistrer.
+  function downloadToDisk(url, filename) {
+    return chrome.downloads.download({ url, filename, saveAs: true });
+  }
+
   // Fonction pour surveiller un téléchargement
   function monitorDownload(job) {
     const serverDownloadId = job.serverId;
@@ -193,27 +198,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
               // Télécharger le fichier directement via Chrome
               const fileUrl = `http://localhost:3010/api/download/file/${serverDownloadId}`;
-              const sanitizedTitle = currentVideoData.title.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, '_').substring(0, 100);
-              const filename = `${sanitizedTitle}.mp4`;
+              let baseName = safeBaseName(currentVideoData.title, currentVideoData.videoId);
 
-              const chromeDownloadId = await chrome.downloads.download({
-                url: fileUrl,
-                filename: filename,
-                saveAs: true
-              });
+              // Un refus du navigateur doit s'afficher : avalé ici, il laissait
+              // le popup figé à 100 % sans rien télécharger.
+              let chromeDownloadId;
+              try {
+                chromeDownloadId = await downloadToDisk(fileUrl, `${baseName}.mp4`);
+              } catch (downloadError) {
+                if (!/invalid filename/i.test(downloadError.message)) {
+                  await resetDownloadState(`Le navigateur a refusé l'enregistrement : ${downloadError.message}`);
+                  return;
+                }
+                // Une règle de nom que le nettoyage ne connaît pas : on retente
+                // avec un nom fait seulement de caractères sûrs.
+                console.warn(`Nom refusé (${baseName}.mp4), nouvel essai avec l'identifiant de la vidéo`);
+                baseName = fallbackBaseName(currentVideoData.videoId);
+                try {
+                  chromeDownloadId = await downloadToDisk(fileUrl, `${baseName}.mp4`);
+                } catch (retryError) {
+                  await resetDownloadState(`Le navigateur a refusé l'enregistrement : ${retryError.message}`);
+                  return;
+                }
+              }
 
               console.log('Chrome download started:', chromeDownloadId);
 
               // Télécharger automatiquement le fichier .url raccourci
               try {
                 const urlFileUrl = `http://localhost:3010/api/download/url/${serverDownloadId}`;
-                const urlFilename = `${sanitizedTitle}.url`;
-
-                const urlDownloadId = await chrome.downloads.download({
-                  url: urlFileUrl,
-                  filename: urlFilename,
-                  saveAs: true // Permettre de choisir le même dossier que la vidéo
-                });
+                // Permettre de choisir le même dossier que la vidéo
+                const urlDownloadId = await downloadToDisk(urlFileUrl, `${baseName}.url`);
 
                 console.log('URL shortcut download started:', urlDownloadId);
               } catch (urlError) {

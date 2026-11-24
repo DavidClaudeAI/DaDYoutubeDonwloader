@@ -21,10 +21,12 @@ Youtube vidéo downloader/
 │   ├── popup.html
 │   ├── popup.css
 │   ├── popup.js
+│   ├── filename.js          # Nom de fichier accepté par Chrome/Brave
 │   ├── content.js
 │   ├── background.js
 │   ├── config.js
 │   └── icons/
+├── tests/                   # Tests (node --test tests/)
 └── backend/                 # Serveur Node.js
     ├── server.js
     ├── package.json
@@ -152,6 +154,12 @@ Le package `youtube-dl-exec` télécharge automatiquement `yt-dlp` lors de l'ins
 
 Le serveur backend n'est pas accessible. Assurez-vous qu'il tourne sur le port 3010.
 
+### Bloqué sur « Récupération du fichier… 100 % »
+
+Le navigateur a refusé d'enregistrer le fichier. Le nom proposé est construit à partir du titre de la vidéo, nettoyé de tout ce que Chrome et Brave refusent (`~`, `|`, caractères invisibles, point final, noms réservés de Windows…) — voir `Extension Chrome/filename.js`. Si le navigateur refuse quand même, l'extension réessaie avec `youtube_<identifiant>.mp4` ; si ça échoue encore, le popup affiche l'erreur au lieu de rester figé.
+
+En dépannage, la vidéo prête est dans `backend/downloads/` tant que le serveur n'a pas redémarré : on peut la copier à la main.
+
 ### Vidéo de mauvaise qualité
 
 Le serveur prend toujours la meilleure résolution proposée par YouTube, jusqu'en 4K. Si le fichier est en dessous, c'est que YouTube ne propose pas mieux pour cette vidéo — ou que le repli « qualité adaptée » s'est déclenché (blocage nsig/SABR/403 de YouTube, visible dans les logs du serveur).
@@ -201,6 +209,14 @@ npm run dev
 ```
 
 Ceci utilise `nodemon` pour redémarrer automatiquement le serveur lors des modifications.
+
+### Tests
+
+```bash
+node --test tests/
+```
+
+Ils vérifient que le nom de fichier proposé respecte toujours les règles de Chrome et Brave.
 
 ### Logs
 
