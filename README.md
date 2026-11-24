@@ -26,7 +26,7 @@ Youtube vidéo downloader/
 │   ├── background.js
 │   ├── config.js
 │   └── icons/
-├── tests/                   # Tests (node --test tests/)
+├── tests/                   # Tests (node --test)
 └── backend/                 # Serveur Node.js
     ├── server.js
     ├── package.json
@@ -213,7 +213,7 @@ Ceci utilise `nodemon` pour redémarrer automatiquement le serveur lors des modi
 ### Tests
 
 ```bash
-node --test tests/
+node --test
 ```
 
 Ils vérifient que le nom de fichier proposé respecte toujours les règles de Chrome et Brave.

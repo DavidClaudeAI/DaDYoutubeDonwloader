@@ -1,5 +1,5 @@
 // Tests du nom de fichier proposé à l'enregistrement.
-// Lancer : node --test tests/
+// Lancer : node --test
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { safeBaseName, fallbackBaseName } = require('../Extension Chrome/filename.js');
